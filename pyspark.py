@@ -194,26 +194,31 @@ core_film_category_df = stg_film_category_df.join(category_df, stg_film_category
 stg_inventory_df = inventory_df.join(core_film_category_df, inventory_df.film_id == core_film_category_df.film_id, 'inner').select(core_film_category_df.name,core_film_category_df.film_id,inventory_df.inventory_id)
 
 
-# In[32]:
+# In[27]:
 
 
-stg_rental_df = rental_df.join(stg_inventory_df,stg_inventory_df.inventory_id == rental_df.inventory_id, 'inner').select(stg_inventory_df.name,stg_inventory_df.film_id,stg_inventory_df.inventory_id,rental_df.rental_id).show()
+stg_rental_df = rental_df.join(stg_inventory_df,stg_inventory_df.inventory_id == rental_df.inventory_id, 'inner').select(stg_inventory_df.name,stg_inventory_df.film_id,stg_inventory_df.inventory_id,rental_df.rental_id)
+
+
+# In[28]:
+
+
+stg_payment_df = stg_rental_df.join(payment_df, payment_df.rental_id == stg_rental_df.rental_id, 'inner').select(stg_rental_df.name,stg_rental_df.film_id, payment_df.amount)
 
 
 # In[29]:
 
 
-payment_df.show()
+final_df = stg_payment_df.groupBy('name').agg(F.sum("amount").alias("film_amount")).orderBy(F.col("film_amount").desc())
 
 
-# In[33]:
+# In[30]:
 
 
-stg_payment_df = payment_df.join(stg_rental_df, payment_df.rental_id == stg_rental_df.rental_id, 'inner')
-#.select(stg_rental_df.name,stg_rental_df.film_id, stg_payment_df.amount)\
+final_df.show()
 
 
-# In[ ]:
+# In[31]:
 
 
 #--  4   вывести названия фильмов, которых нет в inventory. Написать запрос без использования оператора IN.
@@ -221,13 +226,81 @@ stg_payment_df = payment_df.join(stg_rental_df, payment_df.rental_id == stg_rent
 #select f.title from
 #    film f
 #where not exists
-#    (select 1 from inventory i where i.film_id = f.film_id);
+#    (select 1 from inventory i where i.film_id = f.film_id) order by  f.title;
 
 
-# In[ ]:
+# In[32]:
+
+
+final_df = film_df.join(inventory_df, film_df.film_id == inventory_df.film_id, 'left_anti').select(film_df.title).orderBy(F.col('title'))
+
+
+# In[33]:
+
+
+final_df.show()
+
+
+# In[34]:
 
 
 #-- 5    вывести топ 3 актеров, которые больше всего появлялись в фильмах в категории “Children”. Если у нескольких актеров одинаковое кол-во фильмов, вывести всех
+
+
+# In[47]:
+
+
+query = """select * from (
+select top.first_name, top.last_name, top.film_count from (
+select a.first_name, a.last_name,  count(*) film_count
+    from
+      public.actor a
+      join public.film_actor fa ON a.actor_id = fa.actor_id
+      join public.film f ON f.film_id = fa.film_id
+      join public.film_category fcat on f.film_id = fcat.film_id
+      join public.category cat ON fcat.category_id = cat.category_id
+where
+     cat.name = 'Children'
+group by a.first_name, a.last_name
+order by  3 desc) top limit 3) top3
+union all
+--Если у нескольких актеров одинаковое кол-во фильмов, вывести всех
+select top.first_name, top.last_name, top.film_count from (
+select a.first_name, a.last_name,  count(*) film_count
+    from
+      public.actor a
+      join public.film_actor fa ON a.actor_id = fa.actor_id
+      join public.film f ON f.film_id = fa.film_id
+      join public.film_category fcat on f.film_id = fcat.film_id
+      join public.category cat ON fcat.category_id = cat.category_id
+where
+     cat.name = 'Children'
+group by a.first_name, a.last_name
+order by  3 desc) top where top.film_count in (
+select sub.film_count from (
+select a.first_name, a.last_name,  count(*) film_count
+    from
+      public.actor a
+      join public.film_actor fa ON a.actor_id = fa.actor_id
+      join public.film f ON f.film_id = fa.film_id
+      join public.film_category fcat on f.film_id = fcat.film_id
+      join public.category cat ON fcat.category_id = cat.category_id
+where
+     cat.name = 'Children'
+group by a.first_name, a.last_name
+order by  3 desc) sub group by sub.film_count having  count(film_count) >1)"""
+
+
+# In[49]:
+
+
+my_result = spark.read.jdbc(url=pg_url, table=f'({query}) as my_result', properties= pg_properties)
+
+
+# In[50]:
+
+
+my_result.show()
 
 
 # In[ ]:
@@ -250,6 +323,36 @@ stg_payment_df = payment_df.join(stg_rental_df, payment_df.rental_id == stg_rent
 #ORDER BY cust.active, cy.country, c.city;
 
 
+# In[54]:
+
+
+query = """SELECT c.city,
+       cy.country,
+       cust.active,
+       count(*)
+FROM customer cust
+         JOIN rental r ON r.customer_id = cust.customer_id
+         JOIN inventory i ON r.inventory_id = i.inventory_id
+         JOIN store s ON i.store_id = s.store_id
+         JOIN address a ON s.address_id = a.address_id
+         JOIN city c ON a.city_id = c.city_id
+         JOIN country cy ON c.country_id = cy.country_id
+GROUP BY cy.country, c.city, cust.active
+ORDER BY cust.active, cy.country, c.city"""
+
+
+# In[55]:
+
+
+my_result = spark.read.jdbc(url=pg_url, table=f'({query}) as my_result', properties= pg_properties)
+
+
+# In[56]:
+
+
+my_result.show()
+
+
 # In[ ]:
 
 
@@ -269,4 +372,35 @@ stg_payment_df = payment_df.join(stg_rental_df, payment_df.rental_id == stg_rent
 #where city like 'a%' or city like '%-%'
 #group by cat.name, c.city having sum(round(extract(epoch from (r.return_date) - (r.rental_date))/3600)) >0
 #order by 3 desc;
+
+
+# In[57]:
+
+
+query = """select cat.name,
+       c.city,
+       sum(round(extract(epoch from (r.return_date) - (r.rental_date))/3600)) as sum_hours
+from category cat
+join film_category fcat ON fcat.category_id = cat.category_id
+join film f ON f.film_id = fcat.film_id
+join inventory i ON i.film_id = f.film_id
+join rental r on r.inventory_id = i.inventory_id
+join customer cust on r.customer_id = cust.customer_id
+JOIN address a ON cust.address_id = a.address_id
+JOIN city c ON a.city_id = c.city_id
+where city like 'a%' or city like '%-%'
+group by cat.name, c.city having sum(round(extract(epoch from (r.return_date) - (r.rental_date))/3600)) >0
+order by 3 desc"""
+
+
+# In[58]:
+
+
+my_result = spark.read.jdbc(url=pg_url, table=f'({query}) as my_result', properties= pg_properties)
+
+
+# In[59]:
+
+
+my_result.show()
 
